@@ -10,6 +10,7 @@ create table if not exists uploads (
   paid_amount         numeric(18,6) not null,
   reference           text,
   payment_signature   text,
+  uploader_address    text,
   created_at          timestamptz not null default now(),
   expires_at          timestamptz not null,
   used                boolean not null default false,
@@ -35,7 +36,8 @@ create table if not exists files (
   status              text not null,
   encrypted           boolean not null default false,
   checksum_sha256     text,
-  s3_key              text
+  s3_key              text,
+  uploader_address    text
 );
 
 create table if not exists access_tokens (
@@ -47,5 +49,10 @@ create table if not exists access_tokens (
 );
 
 create index if not exists idx_access_tokens_file_id on access_tokens(file_id);
+
+-- Non-destructive column additions for existing databases
+alter table uploads add column if not exists uploader_address text;
+alter table files add column if not exists uploader_address text;
+create index if not exists idx_files_uploader on files(uploader_address);
 
 

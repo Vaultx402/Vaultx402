@@ -109,12 +109,33 @@ export const x402Middleware = (requiredAmount) => {
         });
       }
 
+      // Attempt to infer payer address: find a USDC token account that decreased
+      let payerAddress = null;
+      try {
+        const candidates = [];
+        for (const pre of preTokenBalances) {
+          const post = postTokenBalances.find(b => b.accountIndex === pre.accountIndex);
+          if (!post) continue;
+          const preAmt = parseFloat(pre.uiTokenAmount.uiAmount);
+          const postAmt = parseFloat(post.uiTokenAmount.uiAmount);
+          if (postAmt < preAmt && pre.mint === usdcMintPk.toBase58()) {
+            candidates.push({ owner: pre.owner, delta: preAmt - postAmt });
+          }
+        }
+        if (candidates.length > 0) {
+          // Choose the largest decrease as payer
+          candidates.sort((a, b) => b.delta - a.delta);
+          payerAddress = candidates[0].owner || null;
+        }
+      } catch {}
+
       req.payment = {
         verified: true,
         signature,
         amount: amountTransferred,
         timestamp: tx.blockTime,
-        token: 'USDC'
+        token: 'USDC',
+        payer: payerAddress
       };
 
       next();

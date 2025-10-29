@@ -1,98 +1,12 @@
 import express from 'express';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createRouteHandler } from 'uploadthing/server';
-import { uploadRouter } from '../lib/uploadthing.js';
 import { x402Middleware } from '../middleware/x402.js';
-import { encryptFile, decryptFile, hashPassword } from '../lib/encryption.js';
+import { db } from '../db/client.js';
 
 const router = express.Router();
 
-const files = new Map();
-const encryptedData = new Map();
-
-const calculateUploadPrice = (fileSizeBytes) => {
-  const pricePerMB = parseFloat(process.env.PRICE_PER_MB || '0.01');
-  const fileSizeMB = fileSizeBytes / (1024 * 1024);
-  return (fileSizeMB * pricePerMB).toFixed(2);
-};
-
-router.post('/upload', async (req, res) => {
-  try {
-    const { fileName, fileSize, fileType, maxDownloads, expiresIn, password, fileData } = req.body;
-
-    if (!fileName || !fileSize) {
-      return res.status(400).json({
-        error: 'fileName and fileSize are required'
-      });
-    }
-
-    const requiredPrice = calculateUploadPrice(fileSize);
-
-    const middleware = x402Middleware(requiredPrice);
-
-    await new Promise((resolve, reject) => {
-      middleware(req, res, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-
-    const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    const now = Date.now();
-    const ttlMs = expiresIn ? parseInt(expiresIn) * 1000 : null;
-    const expiresAt = ttlMs ? new Date(now + ttlMs).toISOString() : null;
-
-    const fileRecord = {
-      id: fileId,
-      name: fileName,
-      size: fileSize,
-      type: fileType,
-      uploadedAt: new Date().toISOString(),
-      expiresAt,
-      maxDownloads: maxDownloads ? parseInt(maxDownloads) : null,
-      downloadCount: 0,
-      paymentSignature: req.payment.signature,
-      pricePaid: req.payment.amount,
-      status: 'active',
-      encrypted: !!password
-    };
-
-    if (password && fileData) {
-      const buffer = Buffer.from(fileData, 'base64');
-      const { encrypted, salt, iv } = encryptFile(buffer, password);
-
-      encryptedData.set(fileId, encrypted);
-
-      fileRecord.passwordHash = hashPassword(password);
-      fileRecord.encryptionSalt = salt;
-      fileRecord.encryptionIv = iv;
-    } else if (fileData) {
-      encryptedData.set(fileId, Buffer.from(fileData, 'base64'));
-    }
-
-    files.set(fileId, fileRecord);
-
-    res.setHeader('X-PAYMENT-RESPONSE', JSON.stringify({
-      signature: req.payment.signature,
-      amount: req.payment.amount
-    }));
-
-    res.json({
-      success: true,
-      fileId,
-      file: fileRecord
-    });
-
-  } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({
-      error: 'Upload failed',
-      details: error.message
-    });
-  }
-});
+// Legacy base64 upload removed; uploads handled via /v1/uploads
 
 router.get(
   '/download/:fileId',
@@ -101,8 +15,8 @@ router.get(
     try {
       const { fileId } = req.params;
       const { password } = req.query;
-
-      const file = files.get(fileId);
+      const { rows } = await db.query('select * from files where id=$1', [fileId]);
+      const file = rows[0];
 
       if (!file) {
         return res.status(404).json({
@@ -116,17 +30,15 @@ router.get(
         });
       }
 
-      if (file.expiresAt && new Date() > new Date(file.expiresAt)) {
-        file.status = 'expired';
-        files.set(fileId, file);
+      if (file.expires_at && new Date() > new Date(file.expires_at)) {
+        await db.query('update files set status=$1 where id=$2', ['expired', fileId]);
         return res.status(410).json({
           error: 'File has expired'
         });
       }
 
-      if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
-        file.status = 'expired';
-        files.set(fileId, file);
+      if (file.max_downloads && file.download_count >= file.max_downloads) {
+        await db.query('update files set status=$1 where id=$2', ['expired', fileId]);
         return res.status(410).json({
           error: 'Maximum download limit reached'
         });
@@ -138,32 +50,16 @@ router.get(
         });
       }
 
-      if (file.encrypted && hashPassword(password) !== file.passwordHash) {
+      // No server-side encryption path in S3 mode
+      if (file.encrypted) {
         return res.status(401).json({
           error: 'Invalid password'
         });
       }
 
-      file.downloadCount++;
-      file.lastDownloadedAt = new Date().toISOString();
+      await db.query('update files set download_count=download_count+1 where id=$1', [fileId]);
 
-      if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
-        file.status = 'expired';
-      }
-
-      files.set(fileId, file);
-
-      let fileData = null;
-      if (encryptedData.has(fileId)) {
-        const encrypted = encryptedData.get(fileId);
-
-        if (file.encrypted && password) {
-          const decrypted = decryptFile(encrypted, password);
-          fileData = decrypted.toString('base64');
-        } else {
-          fileData = encrypted.toString('base64');
-        }
-      }
+      const fileData = null;
 
       res.setHeader('X-PAYMENT-RESPONSE', JSON.stringify({
         signature: req.payment.signature,
@@ -174,7 +70,7 @@ router.get(
         success: true,
         file,
         fileData,
-        remainingDownloads: file.maxDownloads ? file.maxDownloads - file.downloadCount : null
+        remainingDownloads: file.max_downloads ? file.max_downloads - (file.download_count + 1) : null
       });
 
     } catch (error) {
@@ -194,22 +90,19 @@ router.get(
   async (req, res) => {
     try {
       const { fileId } = req.params;
-
-      const file = files.get(fileId);
-
-      if (!file) {
-        return res.status(404).json({ error: 'File not found' });
-      }
+      const { rows } = await db.query('select * from files where id=$1', [fileId]);
+      const file = rows[0];
+      if (!file) return res.status(404).json({ error: 'File not found' });
 
       const bucket = process.env.S3_BUCKET;
       const region = process.env.S3_REGION;
       const ttl = parseInt(process.env.S3_PRESIGN_DOWNLOAD_TTL_SECONDS || '60', 10);
-      if (!bucket || !region || !file.s3Key) {
+      if (!bucket || !region || !file.s3_key) {
         return res.status(404).json({ error: 'File storage not available' });
       }
 
       const s3 = new S3Client({ region });
-      const command = new GetObjectCommand({ Bucket: bucket, Key: file.s3Key });
+      const command = new GetObjectCommand({ Bucket: bucket, Key: file.s3_key });
       const signedUrl = await getSignedUrl(s3, command, { expiresIn: ttl });
 
       res.setHeader('X-PAYMENT-RESPONSE', JSON.stringify({
@@ -228,37 +121,24 @@ router.get(
 
 router.get('/list', async (req, res) => {
   try {
-    const { limit = 50, offset = 0, includeExpired = false } = req.query;
-
-    let fileList = Array.from(files.values());
-
+    const { limit = 50, offset = 0, includeExpired = false, uploader } = req.query;
+    const take = parseInt(limit);
+    const skip = parseInt(offset);
+    const params = [];
+    let where = ' where 1=1 ';
     if (!includeExpired) {
-      fileList = fileList.filter(f => f.status === 'active');
+      where += ` and status = $${params.length + 1}`;
+      params.push('active');
     }
-
-    fileList = fileList
-      .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))
-      .slice(parseInt(offset), parseInt(offset) + parseInt(limit))
-      .map(f => ({
-        id: f.id,
-        name: f.name,
-        size: f.size,
-        type: f.type,
-        uploadedAt: f.uploadedAt,
-        expiresAt: f.expiresAt,
-        maxDownloads: f.maxDownloads,
-        downloadCount: f.downloadCount,
-        status: f.status
-      }));
-
-    res.json({
-      success: true,
-      files: fileList,
-      total: files.size,
-      limit: parseInt(limit),
-      offset: parseInt(offset)
-    });
-
+    if (uploader) {
+      where += ` and uploader_address = $${params.length + 1}`;
+      params.push(String(uploader));
+    }
+    const listSql = `select id, name, size, type, uploaded_at, expires_at, max_downloads, download_count, status, uploader_address from files ${where} order by uploaded_at desc limit $${params.length + 1} offset $${params.length + 2}`;
+    const { rows } = await db.query(listSql, [...params, take, skip]);
+    const countSql = `select count(*)::int as c from files ${where}`;
+    const { rows: countRows } = await db.query(countSql, params);
+    res.json({ success: true, files: rows, total: countRows[0].c, limit: take, offset: skip });
   } catch (error) {
     console.error('List error:', error);
     res.status(500).json({
@@ -275,15 +155,23 @@ router.delete(
     try {
       const { fileId } = req.params;
 
-      const file = files.get(fileId);
-
+      const { rows } = await db.query('select * from files where id=$1', [fileId]);
+      const file = rows[0];
       if (!file) {
-        return res.status(404).json({
-          error: 'File not found'
-        });
+        return res.status(404).json({ error: 'File not found' });
       }
 
-      files.delete(fileId);
+      // Best-effort delete from S3
+      try {
+        const bucket = process.env.S3_BUCKET;
+        const region = process.env.S3_REGION;
+        if (bucket && region && file.s3_key) {
+          const s3 = new S3Client({ region });
+          await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: file.s3_key }));
+        }
+      } catch {}
+
+      await db.query('delete from files where id=$1', [fileId]);
 
       res.setHeader('X-PAYMENT-RESPONSE', JSON.stringify({
         signature: req.payment.signature,
@@ -310,30 +198,29 @@ router.get('/:fileId', async (req, res) => {
   try {
     const { fileId } = req.params;
 
-    const file = files.get(fileId);
-
-    if (!file) {
-      return res.status(404).json({
-        error: 'File not found'
-      });
+    const { rows } = await db.query('select * from files where id=$1', [fileId]);
+    const f = rows[0];
+    if (!f) {
+      return res.status(404).json({ error: 'File not found' });
     }
 
-    const isExpired = file.expiresAt && new Date() > new Date(file.expiresAt);
-    const maxDownloadsReached = file.maxDownloads && file.downloadCount >= file.maxDownloads;
+    const isExpired = f.expires_at && new Date() > new Date(f.expires_at);
+    const maxDownloadsReached = f.max_downloads && f.download_count >= f.max_downloads;
 
     res.json({
       success: true,
       file: {
-        id: file.id,
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        uploadedAt: file.uploadedAt,
-        expiresAt: file.expiresAt,
-        maxDownloads: file.maxDownloads,
-        downloadCount: file.downloadCount,
-        remainingDownloads: file.maxDownloads ? file.maxDownloads - file.downloadCount : null,
-        status: isExpired || maxDownloadsReached ? 'expired' : file.status
+        id: f.id,
+        name: f.name,
+        size: f.size != null ? Number(f.size) : null,
+        type: f.type,
+        uploadedAt: f.uploaded_at,
+        expiresAt: f.expires_at,
+        maxDownloads: f.max_downloads,
+        downloadCount: f.download_count,
+        remainingDownloads: f.max_downloads ? Number(f.max_downloads) - Number(f.download_count) : null,
+        status: isExpired || maxDownloadsReached ? 'expired' : f.status,
+        uploaderAddress: f.uploader_address
       }
     });
 
@@ -346,25 +233,4 @@ router.get('/:fileId', async (req, res) => {
   }
 });
 
-const cleanupExpiredFiles = () => {
-  const now = new Date();
-  let cleanedCount = 0;
-
-  for (const [fileId, file] of files.entries()) {
-    const isExpired = file.expiresAt && now > new Date(file.expiresAt);
-    const maxDownloadsReached = file.maxDownloads && file.downloadCount >= file.maxDownloads;
-
-    if (isExpired || maxDownloadsReached) {
-      files.delete(fileId);
-      cleanedCount++;
-    }
-  }
-
-  if (cleanedCount > 0) {
-    console.log(`Cleaned up ${cleanedCount} expired files`);
-  }
-};
-
-setInterval(cleanupExpiredFiles, 60000);
-
-export { router as fileRouter, files };
+export { router as fileRouter };

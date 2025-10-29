@@ -2,14 +2,12 @@ import express from 'express';
 import crypto from 'crypto';
 import { Keypair } from '@solana/web3.js';
 import { x402Middleware } from '../middleware/x402.js';
-import { files as filesStore } from './files.js';
+import { db } from '../db/client.js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const router = express.Router();
 
-// In-memory stores for simplicity
-const uploads = new Map(); // uploadId -> session
-const uploadedData = new Map(); // objectKey -> Buffer
+// DB-backed; no in-memory stores
 
 const MB = 1024 * 1024;
 
@@ -68,18 +66,12 @@ router.post('/initiate', async (req, res) => {
     const objectKey = `obj_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
     const uploadExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-    uploads.set(uploadId, {
-      objectKey,
-      filename,
-      contentType,
-      maxBytes: cappedMaxMB * MB,
-      paidAmount: parseFloat(requiredPrice),
-      reference,
-      paymentSignature: req.payment?.signature,
-      createdAt: new Date().toISOString(),
-      expiresAt: uploadExpiresAt,
-      used: false
-    });
+    await db.query(
+      `insert into uploads (upload_id, object_key, filename, content_type, max_bytes, paid_amount, reference, payment_signature, uploader_address, created_at, expires_at, used)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), $10, false)
+       on conflict (upload_id) do nothing`,
+      [uploadId, objectKey, filename, contentType, cappedMaxMB * MB, parseFloat(requiredPrice), reference, req.payment?.signature || null, req.payment?.payer || null, uploadExpiresAt]
+    );
 
     return res.status(200).json({
       method: 'PUT',
@@ -103,7 +95,8 @@ router.post('/initiate', async (req, res) => {
 router.put('/upload/:uploadId', async (req, res) => {
   try {
     const { uploadId } = req.params;
-    const session = uploads.get(uploadId);
+    const { rows } = await db.query('select * from uploads where upload_id=$1', [uploadId]);
+    const session = rows[0];
 
     if (!session) {
       return res.status(404).json({ error: 'Upload session not found' });
@@ -113,14 +106,14 @@ router.put('/upload/:uploadId', async (req, res) => {
       return res.status(409).json({ error: 'Upload already completed for this URL' });
     }
 
-    if (new Date() > new Date(session.expiresAt)) {
+    if (new Date() > new Date(session.expires_at)) {
       return res.status(410).json({ error: 'Upload URL expired' });
     }
 
     // Enforce content type if provided
-    if (req.headers['content-type'] && session.contentType) {
+    if (req.headers['content-type'] && session.content_type) {
       const provided = String(req.headers['content-type']).split(';')[0].trim();
-      if (provided !== session.contentType) {
+      if (provided !== session.content_type) {
         return res.status(415).json({ error: 'Unsupported content type' });
       }
     }
@@ -129,7 +122,7 @@ router.put('/upload/:uploadId', async (req, res) => {
     if (!contentLength || Number.isNaN(contentLength)) {
       return res.status(411).json({ error: 'Content-Length required' });
     }
-    if (contentLength > session.maxBytes) {
+    if (contentLength > Number(session.max_bytes)) {
       return res.status(413).json({ error: 'Payload Too Large' });
     }
 
@@ -170,7 +163,7 @@ router.put('/upload/:uploadId', async (req, res) => {
     if (!bucket || !region) {
       return res.status(500).json({ error: 'S3 not configured' });
     }
-    const s3Key = `${keyPrefix}${session.objectKey}/${session.filename}`;
+    const s3Key = `${keyPrefix}${session.object_key}/${session.filename}`;
 
     const s3 = new S3Client({ region });
     try {
@@ -178,39 +171,43 @@ router.put('/upload/:uploadId', async (req, res) => {
         Bucket: bucket,
         Key: s3Key,
         Body: buffer,
-        ContentType: session.contentType
+        ContentType: session.content_type
       }));
     } catch (e) {
       console.error('S3 upload failed:', e);
       return res.status(502).json({ error: 'Failed to store file' });
     }
 
-    session.used = true;
-    session.actualSize = buffer.length;
-    session.completedAt = new Date().toISOString();
-    session.checksumSha256 = computedChecksum;
-    session.s3Key = s3Key;
-    uploads.set(uploadId, session);
+    await db.query(
+      `update uploads set used=true, actual_size=$1, completed_at=now(), checksum_sha256=$2, s3_key=$3 where upload_id=$4`,
+      [buffer.length, computedChecksum, s3Key, uploadId]
+    );
 
     // Create a minimal file record to integrate with existing listing/download
-    const fileId = session.objectKey;
+    const fileId = session.object_key;
     const fileRecord = {
       id: fileId,
       name: session.filename,
       size: buffer.length,
-      type: session.contentType,
-      uploadedAt: session.completedAt,
+      type: session.content_type,
+      uploadedAt: session.completed_at,
       expiresAt: null,
       maxDownloads: null,
       downloadCount: 0,
-      paymentSignature: session.paymentSignature,
-      pricePaid: session.paidAmount,
+      paymentSignature: session.payment_signature,
+      pricePaid: session.paid_amount,
       status: 'active',
       encrypted: false,
       checksumSha256: computedChecksum,
-      s3Key
+      s3Key,
+      uploaderAddress: session.uploader_address || null
     };
-    filesStore.set(fileId, fileRecord);
+    await db.query(
+      `insert into files (id, name, size, type, uploaded_at, expires_at, max_downloads, download_count, payment_signature, price_paid, status, encrypted, checksum_sha256, s3_key, uploader_address)
+       values ($1,$2,$3,$4, now(), null, null, 0, $5, $6, 'active', false, $7, $8, $9)
+       on conflict (id) do nothing`,
+      [fileRecord.id, fileRecord.name, fileRecord.size, fileRecord.type, fileRecord.paymentSignature, fileRecord.pricePaid, fileRecord.checksumSha256, fileRecord.s3Key, fileRecord.uploaderAddress]
+    );
 
     return res.status(201).json({
       success: true,
@@ -228,23 +225,19 @@ router.put('/upload/:uploadId', async (req, res) => {
 router.get('/verify/:objectKey', async (req, res) => {
   try {
     const { objectKey } = req.params;
-    // Find session by objectKey
-    let session = null;
-    for (const s of uploads.values()) {
-      if (s.objectKey === objectKey) { session = s; break; }
-    }
-    if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
+    const { rows } = await db.query('select * from uploads where object_key=$1', [objectKey]);
+    const session = rows[0];
+    if (!session) return res.status(404).json({ error: 'Session not found' });
     return res.json({
       objectKey,
-      size: session.actualSize || null,
-      checksumSha256: session.checksumSha256 || null,
+      size: session.actual_size != null ? Number(session.actual_size) : null,
+      checksumSha256: session.checksum_sha256 || null,
       used: session.used,
-      createdAt: session.createdAt,
-      completedAt: session.completedAt || null,
-      paymentSignature: session.paymentSignature || null,
-      utUrl: session.utUrl || null
+      createdAt: session.created_at,
+      completedAt: session.completed_at || null,
+      paymentSignature: session.payment_signature || null,
+      s3Key: session.s3_key || null,
+      uploaderAddress: session.uploader_address || null
     });
   } catch (error) {
     console.error('verify error:', error);
@@ -253,6 +246,6 @@ router.get('/verify/:objectKey', async (req, res) => {
 });
 
 // Export in-memory stores for potential use elsewhere (e.g., download proxy)
-export { router as uploadsRouter, uploads, uploadedData };
+export { router as uploadsRouter };
 
 
