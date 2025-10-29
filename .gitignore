@@ -1,0 +1,33 @@
+# Node / Next.js
+node_modules/
+.next/
+.next-cache/
+.cache/
+.out/
+out/
+dist/
+coverage/
+.eslintcache
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build artifacts
+*.tsbuildinfo
+
+# Vercel / Turbo
+.vercel/
+.turbo/
