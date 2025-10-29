@@ -2,10 +2,12 @@ import express from 'express';
 import { createRouteHandler } from 'uploadthing/server';
 import { uploadRouter } from '../lib/uploadthing.js';
 import { x402Middleware } from '../middleware/x402.js';
+import { encryptFile, decryptFile, hashPassword } from '../lib/encryption.js';
 
 const router = express.Router();
 
 const files = new Map();
+const encryptedData = new Map();
 
 const calculateUploadPrice = (fileSizeBytes) => {
   const pricePerMB = parseFloat(process.env.PRICE_PER_MB || '0.01');
@@ -15,7 +17,7 @@ const calculateUploadPrice = (fileSizeBytes) => {
 
 router.post('/upload', async (req, res) => {
   try {
-    const { fileName, fileSize, fileType, maxDownloads, expiresIn } = req.body;
+    const { fileName, fileSize, fileType, maxDownloads, expiresIn, password, fileData } = req.body;
 
     if (!fileName || !fileSize) {
       return res.status(400).json({
@@ -51,8 +53,22 @@ router.post('/upload', async (req, res) => {
       downloadCount: 0,
       paymentSignature: req.payment.signature,
       pricePaid: req.payment.amount,
-      status: 'active'
+      status: 'active',
+      encrypted: !!password
     };
+
+    if (password && fileData) {
+      const buffer = Buffer.from(fileData, 'base64');
+      const { encrypted, salt, iv } = encryptFile(buffer, password);
+
+      encryptedData.set(fileId, encrypted);
+
+      fileRecord.passwordHash = hashPassword(password);
+      fileRecord.encryptionSalt = salt;
+      fileRecord.encryptionIv = iv;
+    } else if (fileData) {
+      encryptedData.set(fileId, Buffer.from(fileData, 'base64'));
+    }
 
     files.set(fileId, fileRecord);
 
@@ -82,6 +98,7 @@ router.get(
   async (req, res) => {
     try {
       const { fileId } = req.params;
+      const { password } = req.query;
 
       const file = files.get(fileId);
 
@@ -113,6 +130,18 @@ router.get(
         });
       }
 
+      if (file.encrypted && !password) {
+        return res.status(400).json({
+          error: 'Password required for encrypted file'
+        });
+      }
+
+      if (file.encrypted && hashPassword(password) !== file.passwordHash) {
+        return res.status(401).json({
+          error: 'Invalid password'
+        });
+      }
+
       file.downloadCount++;
       file.lastDownloadedAt = new Date().toISOString();
 
@@ -122,6 +151,18 @@ router.get(
 
       files.set(fileId, file);
 
+      let fileData = null;
+      if (encryptedData.has(fileId)) {
+        const encrypted = encryptedData.get(fileId);
+
+        if (file.encrypted && password) {
+          const decrypted = decryptFile(encrypted, password);
+          fileData = decrypted.toString('base64');
+        } else {
+          fileData = encrypted.toString('base64');
+        }
+      }
+
       res.setHeader('X-PAYMENT-RESPONSE', JSON.stringify({
         signature: req.payment.signature,
         amount: req.payment.amount
@@ -130,6 +171,7 @@ router.get(
       res.json({
         success: true,
         file,
+        fileData,
         remainingDownloads: file.maxDownloads ? file.maxDownloads - file.downloadCount : null
       });
 
