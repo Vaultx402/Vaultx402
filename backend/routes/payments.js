@@ -2,6 +2,9 @@ import express from 'express';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 import bs58 from 'bs58';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const router = express.Router();
 

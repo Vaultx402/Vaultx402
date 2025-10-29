@@ -4,7 +4,12 @@ Express server implementing the x402 payment protocol for file exchange operatio
 
 ## Features
 
-- x402 payment protocol integration for Solana
+- x402 payment protocol integration for Solana with USDC
+- Dynamic pricing: 0.01 USDC per MB for uploads
+- Privacy features:
+  - Configurable max download limits per file
+  - File expiration/TTL (time to live)
+  - Automatic cleanup of expired files every 60 seconds
 - File upload/download with payment verification
 - UploadThing integration for file storage
 - RESTful API with clean routing structure
@@ -55,11 +60,16 @@ npm test
 - `GET /api/health` - Server health check
 
 ### Files
-- `POST /api/files/upload` - Upload file (requires x402 payment)
-- `GET /api/files/download/:fileId` - Download file (requires x402 payment)
-- `GET /api/files/list` - List all files
-- `GET /api/files/:fileId` - Get file metadata
-- `DELETE /api/files/:fileId` - Delete file (requires x402 payment)
+- `POST /api/files/upload` - Upload file (requires x402 payment, dynamic pricing per MB)
+  - Body: `{ fileName, fileSize, fileType, maxDownloads?, expiresIn? }`
+  - `maxDownloads`: Optional number of allowed downloads before file expires
+  - `expiresIn`: Optional TTL in seconds (e.g., 3600 = 1 hour)
+- `GET /api/files/download/:fileId` - Download file (requires x402 payment, fixed 0.01 USDC)
+  - Returns remaining downloads if limit is set
+- `GET /api/files/list` - List all active files
+  - Query params: `limit`, `offset`, `includeExpired`
+- `GET /api/files/:fileId` - Get file metadata (free, no payment required)
+- `DELETE /api/files/:fileId` - Delete file (requires x402 payment, fixed 0.005 USDC)
 
 ### Payments
 - `POST /api/payments/verify` - Verify Solana transaction
@@ -115,11 +125,36 @@ backend/
     └── api.test.js     # API tests
 ```
 
-## Payment Prices
+## Payment Pricing
 
-Default prices in USDC (configurable via .env):
-- Upload: 0.01 USDC
-- Download: 0.01 USDC
-- Delete: 0.005 USDC
+All payments are processed using **USDC on Solana mainnet**.
 
-All payments are processed using USDC on Solana mainnet.
+### Dynamic Pricing (configurable via .env):
+- **Upload**: 0.01 USDC per MB (calculated based on file size)
+  - Example: 5MB file = 0.05 USDC
+  - Example: 0.5MB file = 0.01 USDC (minimum)
+- **Download**: 0.01 USDC (fixed)
+- **Delete**: 0.005 USDC (fixed)
+
+### Privacy Features
+
+**Max Downloads:**
+Set `maxDownloads` when uploading to limit how many times a file can be downloaded. Once the limit is reached, the file becomes inaccessible and is automatically deleted.
+
+**File Expiration (TTL):**
+Set `expiresIn` (in seconds) when uploading to automatically expire files after a certain time. Expired files are automatically cleaned up every 60 seconds.
+
+**Example Upload Request:**
+```json
+{
+  "fileName": "secret.pdf",
+  "fileSize": 5242880,
+  "fileType": "application/pdf",
+  "maxDownloads": 3,
+  "expiresIn": 86400
+}
+```
+This creates a 5MB file that:
+- Costs 0.05 USDC to upload
+- Can be downloaded 3 times max
+- Expires after 24 hours (86400 seconds)
