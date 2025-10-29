@@ -31,7 +31,7 @@ const createUploadId = () => crypto.randomBytes(16).toString('hex');
 
 router.post('/initiate', async (req, res) => {
   try {
-    const { filename, contentType, maxSizeMB } = req.body || {};
+    const { filename, contentType, maxSizeMB, encrypted = false, encAlgo, encSalt, encNonce, originalName, originalType } = req.body || {};
 
     if (!filename || !contentType) {
       return res.status(400).json({ error: 'filename and contentType are required' });
@@ -67,10 +67,10 @@ router.post('/initiate', async (req, res) => {
     const uploadExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
     await db.query(
-      `insert into uploads (upload_id, object_key, filename, content_type, max_bytes, paid_amount, reference, payment_signature, uploader_address, created_at, expires_at, used)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), $10, false)
+      `insert into uploads (upload_id, object_key, filename, content_type, max_bytes, paid_amount, reference, payment_signature, uploader_address, encrypted, enc_algo, enc_salt, enc_nonce, original_name, original_type, created_at, expires_at, used)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now(), $16, false)
        on conflict (upload_id) do nothing`,
-      [uploadId, objectKey, filename, contentType, cappedMaxMB * MB, parseFloat(requiredPrice), reference, req.payment?.signature || null, req.payment?.payer || null, uploadExpiresAt]
+      [uploadId, objectKey, filename, contentType, cappedMaxMB * MB, parseFloat(requiredPrice), reference, req.payment?.signature || null, req.payment?.payer || null, !!encrypted, encAlgo || null, encSalt || null, encNonce || null, originalName || null, originalType || null, uploadExpiresAt]
     );
 
     return res.status(200).json({
@@ -197,16 +197,21 @@ router.put('/upload/:uploadId', async (req, res) => {
       paymentSignature: session.payment_signature,
       pricePaid: session.paid_amount,
       status: 'active',
-      encrypted: false,
+      encrypted: !!session.encrypted,
       checksumSha256: computedChecksum,
       s3Key,
-      uploaderAddress: session.uploader_address || null
+      uploaderAddress: session.uploader_address || null,
+      encAlgo: session.enc_algo || null,
+      encSalt: session.enc_salt || null,
+      encNonce: session.enc_nonce || null,
+      originalName: session.original_name || null,
+      originalType: session.original_type || null
     };
     await db.query(
-      `insert into files (id, name, size, type, uploaded_at, expires_at, max_downloads, download_count, payment_signature, price_paid, status, encrypted, checksum_sha256, s3_key, uploader_address)
-       values ($1,$2,$3,$4, now(), null, null, 0, $5, $6, 'active', false, $7, $8, $9)
+      `insert into files (id, name, size, type, uploaded_at, expires_at, max_downloads, download_count, payment_signature, price_paid, status, encrypted, checksum_sha256, s3_key, uploader_address, enc_algo, enc_salt, enc_nonce, original_name, original_type)
+       values ($1,$2,$3,$4, now(), null, null, 0, $5, $6, 'active', $7, $8, $9, $10, $11, $12, $13, $14, $15)
        on conflict (id) do nothing`,
-      [fileRecord.id, fileRecord.name, fileRecord.size, fileRecord.type, fileRecord.paymentSignature, fileRecord.pricePaid, fileRecord.checksumSha256, fileRecord.s3Key, fileRecord.uploaderAddress]
+      [fileRecord.id, fileRecord.name, fileRecord.size, fileRecord.type, fileRecord.paymentSignature, fileRecord.pricePaid, fileRecord.encrypted, fileRecord.checksumSha256, fileRecord.s3Key, fileRecord.uploaderAddress, fileRecord.encAlgo, fileRecord.encSalt, fileRecord.encNonce, fileRecord.originalName, fileRecord.originalType]
     );
 
     return res.status(201).json({
@@ -237,7 +242,13 @@ router.get('/verify/:objectKey', async (req, res) => {
       completedAt: session.completed_at || null,
       paymentSignature: session.payment_signature || null,
       s3Key: session.s3_key || null,
-      uploaderAddress: session.uploader_address || null
+      uploaderAddress: session.uploader_address || null,
+      encrypted: !!session.encrypted,
+      encAlgo: session.enc_algo || null,
+      encSalt: session.enc_salt || null,
+      encNonce: session.enc_nonce || null,
+      originalName: session.original_name || null,
+      originalType: session.original_type || null
     });
   } catch (error) {
     console.error('verify error:', error);

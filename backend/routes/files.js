@@ -220,7 +220,13 @@ router.get('/:fileId', async (req, res) => {
         downloadCount: f.download_count,
         remainingDownloads: f.max_downloads ? Number(f.max_downloads) - Number(f.download_count) : null,
         status: isExpired || maxDownloadsReached ? 'expired' : f.status,
-        uploaderAddress: f.uploader_address
+        uploaderAddress: f.uploader_address,
+        encrypted: !!f.encrypted,
+        encAlgo: f.enc_algo,
+        encSalt: f.enc_salt,
+        encNonce: f.enc_nonce,
+        originalName: f.original_name,
+        originalType: f.original_type
       }
     });
 
