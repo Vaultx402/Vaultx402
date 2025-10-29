@@ -1,5 +1,10 @@
 import { Connection, Keypair, PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
-import { getAssociatedTokenAddress, createTransferInstruction } from '@solana/spl-token';
+import {
+  getAssociatedTokenAddress,
+  createTransferInstruction,
+  createAssociatedTokenAccountInstruction,
+  getAccount
+} from '@solana/spl-token';
 import bs58 from 'bs58';
 import dotenv from 'dotenv';
 import fs from 'fs';
@@ -38,6 +43,23 @@ const sendUSDCPayment = async (amountUSDC) => {
       blockhash,
       lastValidBlockHeight
     });
+
+    let recipientAccountExists = true;
+    try {
+      await getAccount(connection, recipientAta);
+      console.log('✅ Recipient ATA exists');
+    } catch (error) {
+      console.log('⚠️  Recipient ATA does not exist, creating it...');
+      recipientAccountExists = false;
+      transaction.add(
+        createAssociatedTokenAccountInstruction(
+          testWallet.publicKey,
+          recipientAta,
+          recipientWallet,
+          USDC_MINT
+        )
+      );
+    }
 
     transaction.add(
       createTransferInstruction(

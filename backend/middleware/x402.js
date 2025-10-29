@@ -79,14 +79,15 @@ export const x402Middleware = (requiredAmount) => {
       const postBalance = postTokenBalances.find(b => b.accountIndex === ataIndex);
       const preBalance = preTokenBalances.find(b => b.accountIndex === ataIndex);
 
-      if (!postBalance || !preBalance) {
+      if (!postBalance) {
         return res.status(400).json({
           error: 'Token balance information not found'
         });
       }
 
-      const amountTransferred = parseFloat(postBalance.uiTokenAmount.uiAmount) -
-                                parseFloat(preBalance.uiTokenAmount.uiAmount);
+      const preAmount = preBalance ? parseFloat(preBalance.uiTokenAmount.uiAmount) : 0;
+      const postAmount = parseFloat(postBalance.uiTokenAmount.uiAmount);
+      const amountTransferred = postAmount - preAmount;
       const expectedUSDC = parseFloat(requiredAmount);
 
       if (amountTransferred < expectedUSDC) {
