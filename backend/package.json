@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node tests/api.test.js"
+    "test": "node tests/api.test.js",
+    "db:init": "node scripts/db-init.js"
   },
   "keywords": [
     "x402",
@@ -18,12 +19,15 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.919.0",
+    "@aws-sdk/s3-request-presigner": "^3.919.0",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.95.8",
     "bs58": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.0.1",
+    "pg": "^8.16.3",
     "uploadthing": "^7.4.0"
   }
 }

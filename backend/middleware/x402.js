@@ -9,7 +9,7 @@ const connection = new Connection(
   'confirmed'
 );
 
-const USDC_MINT = new PublicKey(process.env.USDC_MINT);
+// Lazily construct PublicKeys only when needed to allow test-mode without valid keys
 
 export const x402Middleware = (requiredAmount) => {
   return async (req, res, next) => {
@@ -34,6 +34,18 @@ export const x402Middleware = (requiredAmount) => {
     }
 
     try {
+      // Test mode: accept any payment header and short-circuit verification
+      if (process.env.X402_TEST_MODE === 'true') {
+        req.payment = {
+          verified: true,
+          signature: 'TEST_SIGNATURE',
+          amount: parseFloat(requiredAmount),
+          timestamp: Math.floor(Date.now() / 1000),
+          token: 'USDC'
+        };
+        return next();
+      }
+
       const paymentData = JSON.parse(
         Buffer.from(paymentHeader, 'base64').toString('utf-8')
       );
@@ -57,8 +69,9 @@ export const x402Middleware = (requiredAmount) => {
         });
       }
 
+      const usdcMintPk = new PublicKey(process.env.USDC_MINT);
       const recipientAta = await getAssociatedTokenAddress(
-        USDC_MINT,
+        usdcMintPk,
         new PublicKey(process.env.SOLANA_WALLET_ADDRESS)
       );
 

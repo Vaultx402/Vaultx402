@@ -1,4 +1,6 @@
 import express from 'express';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createRouteHandler } from 'uploadthing/server';
 import { uploadRouter } from '../lib/uploadthing.js';
 import { x402Middleware } from '../middleware/x402.js';
@@ -181,6 +183,45 @@ router.get(
         error: 'Download failed',
         details: error.message
       });
+    }
+  }
+);
+
+// New: pay-to-view that returns a temporary redirect to the UploadThing URL
+router.get(
+  '/view/:fileId',
+  x402Middleware(process.env.DOWNLOAD_PRICE || '0.01'),
+  async (req, res) => {
+    try {
+      const { fileId } = req.params;
+
+      const file = files.get(fileId);
+
+      if (!file) {
+        return res.status(404).json({ error: 'File not found' });
+      }
+
+      const bucket = process.env.S3_BUCKET;
+      const region = process.env.S3_REGION;
+      const ttl = parseInt(process.env.S3_PRESIGN_DOWNLOAD_TTL_SECONDS || '60', 10);
+      if (!bucket || !region || !file.s3Key) {
+        return res.status(404).json({ error: 'File storage not available' });
+      }
+
+      const s3 = new S3Client({ region });
+      const command = new GetObjectCommand({ Bucket: bucket, Key: file.s3Key });
+      const signedUrl = await getSignedUrl(s3, command, { expiresIn: ttl });
+
+      res.setHeader('X-PAYMENT-RESPONSE', JSON.stringify({
+        signature: req.payment.signature,
+        amount: req.payment.amount
+      }));
+
+      // 302 redirect to presigned S3 URL (temporary)
+      return res.redirect(302, signedUrl);
+    } catch (error) {
+      console.error('View error:', error);
+      res.status(500).json({ error: 'View failed', details: error.message });
     }
   }
 );

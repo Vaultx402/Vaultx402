@@ -13,7 +13,7 @@ const connection = new Connection(
   'confirmed'
 );
 
-const USDC_MINT = new PublicKey(process.env.USDC_MINT);
+// Lazily construct USDC mint only within handlers to allow running in test mode without valid keys
 
 router.post('/verify', async (req, res) => {
   try {
@@ -44,8 +44,9 @@ router.post('/verify', async (req, res) => {
       });
     }
 
+    const usdcMintPk = new PublicKey(process.env.USDC_MINT);
     const recipientAta = await getAssociatedTokenAddress(
-      USDC_MINT,
+      usdcMintPk,
       new PublicKey(expectedRecipient)
     );
 
