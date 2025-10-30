@@ -1,14 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Navigation from './components/Navigation';
 import Footer from './components/Footer';
+import VaultDoorIntro from './components/VaultDoorIntro';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('weapon');
+  const [showIntro, setShowIntro] = useState(true);
+  const [fadeOut, setFadeOut] = useState(false);
+
+  const handleIntroComplete = () => {
+    setFadeOut(true);
+    // Wait for fade animation to complete before removing intro
+    setTimeout(() => {
+      setShowIntro(false);
+    }, 600); // Faster fade removal
+  };
 
   return (
     <>
+      {showIntro && (
+        <div className={`vault-intro-wrapper ${fadeOut ? 'fade-out' : ''}`}>
+          <VaultDoorIntro onComplete={handleIntroComplete} />
+        </div>
+      )}
+
       <Navigation />
 
       <div className="container">

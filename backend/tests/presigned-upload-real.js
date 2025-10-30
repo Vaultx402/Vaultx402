@@ -104,14 +104,16 @@ const sendUSDCPayment = async (amountUSDC, recipientPubkey = RECIPIENT_WALLET) =
 };
 
 const run = async () => {
-  const testFilePath = '/Users/will/Desktop/xxx.glb';
-  const contentType = 'model/gltf-binary';
+  const fallbackPath = '/Users/will/x402vault/frontend/public/img/stat/bullets.png';
+  const testFilePath = process.env.TEST_FILE_PATH || fallbackPath;
+  const ext = path.extname(testFilePath).toLowerCase();
+  const contentType = ext === '.glb' ? 'model/gltf-binary' : (ext === '.png' ? 'image/png' : 'application/octet-stream');
   const payload = fs.readFileSync(testFilePath);
   const maxSizeMB = Math.max(2, Math.ceil(payload.length / (1024 * 1024)));
 
   console.log('Initiating (expect 402 challenge)...');
   const challenge = await makeJsonRequest('/v1/uploads/initiate', 'POST', {
-    filename: 'xxx.glb',
+    filename: path.basename(testFilePath),
     contentType,
     maxSizeMB
   });
@@ -135,7 +137,7 @@ const run = async () => {
 
   console.log('Retrying initiate with payment...');
   const initiate = await makeJsonRequest('/v1/uploads/initiate', 'POST', {
-    filename: 'xxx.glb',
+    filename: path.basename(testFilePath),
     contentType,
     maxSizeMB
   }, { 'x-payment': paymentHeader });

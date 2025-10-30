@@ -11,6 +11,8 @@ create table if not exists uploads (
   reference           text,
   payment_signature   text,
   uploader_address    text,
+  target_max_downloads integer,
+  target_expires_at   timestamptz,
   encrypted           boolean not null default false,
   enc_algo            text,
   enc_salt            text,
@@ -35,6 +37,7 @@ create table if not exists files (
   type                text not null,
   uploaded_at         timestamptz not null default now(),
   expires_at          timestamptz,
+  delete_after        timestamptz,
   max_downloads       integer,
   download_count      integer not null default 0,
   payment_signature   text,
@@ -63,7 +66,10 @@ create index if not exists idx_access_tokens_file_id on access_tokens(file_id);
 
 -- Non-destructive column additions for existing databases
 alter table uploads add column if not exists uploader_address text;
+alter table uploads add column if not exists target_max_downloads integer;
+alter table uploads add column if not exists target_expires_at timestamptz;
 alter table uploads add column if not exists encrypted boolean not null default false;
+alter table files add column if not exists delete_after timestamptz;
 alter table uploads add column if not exists enc_algo text;
 alter table uploads add column if not exists enc_salt text;
 alter table uploads add column if not exists enc_nonce text;

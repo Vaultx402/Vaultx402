@@ -4,6 +4,7 @@ import https from 'https';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import bs58 from 'bs58';
+import path from 'path';
 import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
 import {
   getAssociatedTokenAddress,
@@ -106,8 +107,10 @@ const decryptAesGcm = (payload, password, saltHex, nonceHex) => {
 };
 
 const run = async () => {
-  const originalPath = '/Users/will/Desktop/xxx.glb';
-  const originalType = 'model/gltf-binary';
+  const fallbackPath = '/Users/will/x402vault/frontend/public/img/stat/bullets.png';
+  const originalPath = process.env.TEST_FILE_PATH || fallbackPath;
+  const ext = path.extname(originalPath).toLowerCase();
+  const originalType = ext === '.glb' ? 'model/gltf-binary' : (ext === '.png' ? 'image/png' : 'application/octet-stream');
   const original = fs.readFileSync(originalPath);
   const password = 'test_password_123';
 
@@ -118,19 +121,21 @@ const run = async () => {
 
   // 402 challenge
   const challenge = await makeJson('/v1/uploads/initiate', 'POST', {
-    filename: 'xxx.glb.enc',
+    filename: `${path.basename(originalPath)}.enc`,
     contentType,
     maxSizeMB,
     encrypted: true,
     encAlgo: 'AES-256-GCM',
     encSalt: saltHex,
     encNonce: nonceHex,
-    originalName: 'xxx.glb',
+    originalName: path.basename(originalPath),
     originalType
   });
   if (challenge.status !== 402) throw new Error(`challenge ${challenge.status}`);
   const amount = challenge.body.amount;
   const recipients = challenge.body.recipients;
+  console.log('Challenge amount (USDC):', amount);
+  console.log('Recipient wallet:', recipients?.[0] || RECIPIENT_WALLET.toBase58());
 
   // Pay
   const sig = await sendUSDCPayment(amount, new PublicKey(recipients?.[0] || RECIPIENT_WALLET));
@@ -138,14 +143,14 @@ const run = async () => {
 
   // Initiate with payment
   const init = await makeJson('/v1/uploads/initiate', 'POST', {
-    filename: 'xxx.glb.enc',
+    filename: `${path.basename(originalPath)}.enc`,
     contentType,
     maxSizeMB,
     encrypted: true,
     encAlgo: 'AES-256-GCM',
     encSalt: saltHex,
     encNonce: nonceHex,
-    originalName: 'xxx.glb',
+    originalName: path.basename(originalPath),
     originalType
   }, { 'x-payment': paymentHeader });
   if (init.status !== 200) {

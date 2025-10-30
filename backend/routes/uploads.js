@@ -31,7 +31,7 @@ const createUploadId = () => crypto.randomBytes(16).toString('hex');
 
 router.post('/initiate', async (req, res) => {
   try {
-    const { filename, contentType, maxSizeMB, encrypted = false, encAlgo, encSalt, encNonce, originalName, originalType } = req.body || {};
+    const { filename, contentType, maxSizeMB, encrypted = false, encAlgo, encSalt, encNonce, originalName, originalType, maxDownloads, expiresIn } = req.body || {};
 
     if (!filename || !contentType) {
       return res.status(400).json({ error: 'filename and contentType are required' });
@@ -41,6 +41,10 @@ router.post('/initiate', async (req, res) => {
     const amount = computePriceForCeiling(cappedMaxMB);
     const reference = Keypair.generate().publicKey.toBase58();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const targetMaxDownloads = Number.isFinite(Number(maxDownloads)) && Number(maxDownloads) > 0 ? Math.floor(Number(maxDownloads)) : null;
+    const targetExpiresAt = Number.isFinite(Number(expiresIn)) && Number(expiresIn) > 0
+      ? new Date(Date.now() + Math.floor(Number(expiresIn)) * 1000).toISOString()
+      : null;
 
     const requiredPrice = amount; // in USDC
 
@@ -67,10 +71,10 @@ router.post('/initiate', async (req, res) => {
     const uploadExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
     await db.query(
-      `insert into uploads (upload_id, object_key, filename, content_type, max_bytes, paid_amount, reference, payment_signature, uploader_address, encrypted, enc_algo, enc_salt, enc_nonce, original_name, original_type, created_at, expires_at, used)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now(), $16, false)
+      `insert into uploads (upload_id, object_key, filename, content_type, max_bytes, paid_amount, reference, payment_signature, uploader_address, target_max_downloads, target_expires_at, encrypted, enc_algo, enc_salt, enc_nonce, original_name, original_type, created_at, expires_at, used)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now(), $18, false)
        on conflict (upload_id) do nothing`,
-      [uploadId, objectKey, filename, contentType, cappedMaxMB * MB, parseFloat(requiredPrice), reference, req.payment?.signature || null, req.payment?.payer || null, !!encrypted, encAlgo || null, encSalt || null, encNonce || null, originalName || null, originalType || null, uploadExpiresAt]
+      [uploadId, objectKey, filename, contentType, cappedMaxMB * MB, parseFloat(requiredPrice), reference, req.payment?.signature || null, req.payment?.payer || null, targetMaxDownloads, targetExpiresAt, !!encrypted, encAlgo || null, encSalt || null, encNonce || null, originalName || null, originalType || null, uploadExpiresAt]
     );
 
     return res.status(200).json({
@@ -131,7 +135,7 @@ router.put('/upload/:uploadId', async (req, res) => {
     await new Promise((resolve, reject) => {
       req.on('data', (chunk) => {
         received += chunk.length;
-        if (received > session.maxBytes) {
+        if (received > Number(session.max_bytes)) {
           reject(Object.assign(new Error('Payload Too Large'), { status: 413 }));
           req.destroy();
           return;
@@ -207,11 +211,33 @@ router.put('/upload/:uploadId', async (req, res) => {
       originalName: session.original_name || null,
       originalType: session.original_type || null
     };
+    // Load target limits from the upload session, if any
+    const { rows: targetRows } = await db.query('select target_max_downloads, target_expires_at from uploads where upload_id=$1', [uploadId]);
+    const target = targetRows[0] || {};
+
     await db.query(
       `insert into files (id, name, size, type, uploaded_at, expires_at, max_downloads, download_count, payment_signature, price_paid, status, encrypted, checksum_sha256, s3_key, uploader_address, enc_algo, enc_salt, enc_nonce, original_name, original_type)
-       values ($1,$2,$3,$4, now(), null, null, 0, $5, $6, 'active', $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       values ($1,$2,$3,$4, now(), $5, $6, 0, $7, $8, 'active', $9, $10, $11, $12, $13, $14, $15, $16, $17)
        on conflict (id) do nothing`,
-      [fileRecord.id, fileRecord.name, fileRecord.size, fileRecord.type, fileRecord.paymentSignature, fileRecord.pricePaid, fileRecord.encrypted, fileRecord.checksumSha256, fileRecord.s3Key, fileRecord.uploaderAddress, fileRecord.encAlgo, fileRecord.encSalt, fileRecord.encNonce, fileRecord.originalName, fileRecord.originalType]
+      [
+        fileRecord.id,
+        fileRecord.name,
+        fileRecord.size,
+        fileRecord.type,
+        target.target_expires_at || null,
+        target.target_max_downloads || null,
+        fileRecord.paymentSignature,
+        fileRecord.pricePaid,
+        fileRecord.encrypted,
+        fileRecord.checksumSha256,
+        fileRecord.s3Key,
+        fileRecord.uploaderAddress,
+        fileRecord.encAlgo,
+        fileRecord.encSalt,
+        fileRecord.encNonce,
+        fileRecord.originalName,
+        fileRecord.originalType
+      ]
     );
 
     return res.status(201).json({

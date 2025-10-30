@@ -129,6 +129,16 @@ export const x402Middleware = (requiredAmount) => {
         }
       } catch {}
 
+      // Fallback: use transaction fee payer if token balance inference failed
+      if (!payerAddress) {
+        try {
+          const keys = tx.transaction.message.getAccountKeys().staticAccountKeys;
+          if (keys && keys.length > 0) {
+            payerAddress = keys[0].toBase58();
+          }
+        } catch {}
+      }
+
       req.payment = {
         verified: true,
         signature,

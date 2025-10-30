@@ -94,11 +94,35 @@ router.get(
       const file = rows[0];
       if (!file) return res.status(404).json({ error: 'File not found' });
 
+      // Enforce expiration
+      if (file.status === 'expired') {
+        return res.status(410).json({ error: 'File has expired' });
+      }
+      if (file.expires_at && new Date() > new Date(file.expires_at)) {
+        await db.query('update files set status=$1 where id=$2', ['expired', fileId]);
+        return res.status(410).json({ error: 'File has expired' });
+      }
+
+      // Enforce max downloads (burn on X reads)
+      if (file.max_downloads && file.download_count >= file.max_downloads) {
+        await db.query('update files set status=$1 where id=$2', ['expired', fileId]);
+        return res.status(410).json({ error: 'Maximum download limit reached' });
+      }
+
       const bucket = process.env.S3_BUCKET;
       const region = process.env.S3_REGION;
       const ttl = parseInt(process.env.S3_PRESIGN_DOWNLOAD_TTL_SECONDS || '60', 10);
       if (!bucket || !region || !file.s3_key) {
         return res.status(404).json({ error: 'File storage not available' });
+      }
+
+      // Increment download count prior to issuing redirect
+      await db.query('update files set download_count=download_count+1 where id=$1', [fileId]);
+
+      // If this view consumes the last allowed read, mark as expired and schedule deletion
+      if (file.max_downloads && (Number(file.download_count) + 1) >= Number(file.max_downloads)) {
+        const deleteAfter = new Date(Date.now() + ttl * 1000).toISOString();
+        await db.query('update files set status=$1, delete_after=$2 where id=$3', ['expired', deleteAfter, fileId]);
       }
 
       const s3 = new S3Client({ region });
@@ -159,6 +183,15 @@ router.delete(
       const file = rows[0];
       if (!file) {
         return res.status(404).json({ error: 'File not found' });
+      }
+
+      // Optionally restrict delete to original payer/uploader
+      if (process.env.RESTRICT_DELETE_TO_OWNER === 'true') {
+        const payer = req.payment?.payer || null;
+        // Enforce only if uploader_address is recorded; otherwise allow (legacy uploads)
+        if (file.uploader_address && (!payer || payer !== file.uploader_address)) {
+          return res.status(403).json({ error: 'Only the uploader can delete this file' });
+        }
       }
 
       // Best-effort delete from S3

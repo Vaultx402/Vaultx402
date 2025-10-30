@@ -99,13 +99,15 @@ const runTests = async () => {
   });
 
   await test('Upload without payment returns 402', async () => {
-    const res = await makeRequest('/api/files/upload', 'POST', {
-      fileName: 'test.txt',
-      fileSize: 1024,
-      fileType: 'text/plain'
+    const res = await makeRequest('/v1/uploads/initiate', 'POST', {
+      filename: 'test.txt',
+      contentType: 'text/plain',
+      maxSizeMB: 1
     });
     if (res.status !== 402) throw new Error(`Expected 402, got ${res.status}`);
-    if (!res.body.requirements) throw new Error('Missing payment requirements');
+    if (!res.body.amount || !Array.isArray(res.body.recipients)) {
+      throw new Error('Missing payment challenge fields');
+    }
   });
 
   await test('Download without payment returns 402', async () => {
@@ -125,10 +127,10 @@ const runTests = async () => {
       network: 'solana'
     })).toString('base64');
 
-    const res = await makeRequest('/api/files/upload', 'POST', {
-      fileName: 'test.txt',
-      fileSize: 1024,
-      fileType: 'text/plain'
+    const res = await makeRequest('/v1/uploads/initiate', 'POST', {
+      filename: 'test.txt',
+      contentType: 'text/plain',
+      maxSizeMB: 1
     }, {
       'x-payment': invalidPayment
     });

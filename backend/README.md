@@ -11,7 +11,7 @@ Express server implementing the x402 payment protocol for file exchange operatio
   - File expiration/TTL (time to live)
   - Automatic cleanup of expired files every 60 seconds
 - File upload/download with payment verification
-- UploadThing integration for file storage
+- S3-based presigned uploads for file storage
 - RESTful API with clean routing structure
 - Payment verification and settlement endpoints
 
@@ -30,10 +30,14 @@ cp .env.example .env
 3. Required environment variables:
 - `SOLANA_WALLET_ADDRESS`: Your Solana wallet address for receiving USDC payments
 - `HELIUS_API_KEY`: Your Helius RPC API key
-- `UPLOADTHING_TOKEN`: Your UploadThing API token
 - `USDC_MINT`: USDC token mint address (default: mainnet USDC)
 - `MAX_FILE_SIZE`: Maximum file size in MB (default: 50)
 - `PORT`: Server port (default: 3001)
+
+S3 storage (required):
+- `S3_BUCKET`, `S3_REGION`, `S3_UPLOAD_KEY_PREFIX`
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- `S3_PRESIGN_UPLOAD_TTL_SECONDS`, `S3_PRESIGN_DOWNLOAD_TTL_SECONDS`
 
 ## Running
 
@@ -60,12 +64,12 @@ npm test
 - `GET /api/health` - Server health check
 
 ### Files
-- `POST /api/files/upload` - Upload file (requires x402 payment, dynamic pricing per MB)
-  - Body: `{ fileName, fileSize, fileType, maxDownloads?, expiresIn? }`
-  - `maxDownloads`: Optional number of allowed downloads before file expires
-  - `expiresIn`: Optional TTL in seconds (e.g., 3600 = 1 hour)
-- `GET /api/files/download/:fileId` - Download file (requires x402 payment, fixed 0.01 USDC)
-  - Returns remaining downloads if limit is set
+- `POST /v1/uploads/initiate` - Begin an upload session
+  - 402 challenge if unpaid: `{ chain, tokenMint, amount, recipients, reference, expiresAt }`
+  - On success with `X-PAYMENT`: `{ method, uploadUrl, objectKey, uploadExpiresAt, contentType, maxBytes, checksum, verifyUrl, fileMetaUrl }`
+- `PUT /v1/uploads/upload/:uploadId` - Upload file bytes (binary body)
+- `GET /v1/uploads/verify/:objectKey` - Verify upload status and checksum
+- `GET /api/files/view/:fileId` - Pay-to-view: redirects (302) to S3 presigned URL
 - `GET /api/files/list` - List all active files
   - Query params: `limit`, `offset`, `includeExpired`
 - `GET /api/files/:fileId` - Get file metadata (free, no payment required)
@@ -92,7 +96,7 @@ This server implements the x402 payment protocol with **USDC-only** payments. Pr
     "asset": "USDC",
     "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "timeout": 300,
-    "resource": "/api/files/upload",
+    "resource": "/v1/uploads/initiate",
     "description": "Payment required for file operation"
   }]
 }
@@ -119,10 +123,12 @@ backend/
 │   └── health.js       # Health check
 ├── middleware/
 │   └── x402.js         # x402 payment middleware
-├── lib/
-│   └── uploadthing.js  # UploadThing configuration
+├── routes/
+│   └── uploads.js      # Presigned upload/session handling
 └── tests/
-    └── api.test.js     # API tests
+    ├── api.test.js                         # API tests (no-chain)
+    ├── presigned-upload-real.js            # Real USDC + presigned upload flow
+    └── presigned-upload-encrypted-real.js  # Real USDC + client-side encrypted flow
 ```
 
 ## Payment Pricing

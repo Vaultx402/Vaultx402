@@ -5,6 +5,22 @@
     src: url('/fonts/monofonto rg.otf');
 }
 
+/* Vault Door Intro Animation Styles */
+.vault-intro-wrapper {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 10000;
+    opacity: 1;
+    transition: opacity 0.6s ease-out;
+}
+
+.vault-intro-wrapper.fade-out {
+    opacity: 0;
+}
+
 html, body{
     color: #14fe17 !important;
     font-family: PipBoy,sans-serif !important;
