@@ -1,0 +1,229 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+
+interface LoadingScreenProps {
+  fadeOut?: boolean;
+}
+
+export default function LoadingScreen({ fadeOut = false }: LoadingScreenProps) {
+  const [show4, setShow4] = useState(false);
+  const [show0, setShow0] = useState(false);
+  const [show2, setShow2] = useState(false);
+  const [flicker4, setFlicker4] = useState(true);
+  const [flicker0, setFlicker0] = useState(true);
+  const [flicker2, setFlicker2] = useState(true);
+  const [allLoaded, setAllLoaded] = useState(false);
+
+  useEffect(() => {
+    // Number 4 fades in
+    setTimeout(() => {
+      setShow4(true);
+    }, 200);
+
+    // Number 4 flickers
+    setTimeout(() => {
+      setFlicker4(false);
+    }, 500);
+    setTimeout(() => {
+      setFlicker4(true);
+    }, 550);
+    setTimeout(() => {
+      setFlicker4(false);
+    }, 600);
+    setTimeout(() => {
+      setFlicker4(true);
+    }, 650);
+
+    // Number 0 fades in
+    setTimeout(() => {
+      setShow0(true);
+    }, 850);
+
+    // Number 0 flickers
+    setTimeout(() => {
+      setFlicker0(false);
+    }, 1150);
+    setTimeout(() => {
+      setFlicker0(true);
+    }, 1200);
+    setTimeout(() => {
+      setFlicker0(false);
+    }, 1250);
+    setTimeout(() => {
+      setFlicker0(true);
+    }, 1300);
+
+    // Number 2 fades in
+    setTimeout(() => {
+      setShow2(true);
+    }, 1500);
+
+    // Number 2 flickers
+    setTimeout(() => {
+      setFlicker2(false);
+    }, 1800);
+    setTimeout(() => {
+      setFlicker2(true);
+    }, 1850);
+    setTimeout(() => {
+      setFlicker2(false);
+    }, 1900);
+    setTimeout(() => {
+      setFlicker2(true);
+    }, 1950);
+
+    // Mark all loaded after initial sequence
+    setTimeout(() => {
+      setAllLoaded(true);
+    }, 2000);
+
+    return () => {};
+  }, []);
+
+  // Continuous flashing after all numbers are loaded
+  useEffect(() => {
+    if (!allLoaded) return;
+
+    const flashInterval = setInterval(() => {
+      // Flash all numbers together
+      setFlicker4(false);
+      setFlicker0(false);
+      setFlicker2(false);
+
+      setTimeout(() => {
+        setFlicker4(true);
+        setFlicker0(true);
+        setFlicker2(true);
+      }, 100);
+    }, 800);
+
+    return () => {
+      clearInterval(flashInterval);
+    };
+  }, [allLoaded]);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        zIndex: 10,
+        opacity: fadeOut ? 0 : 1,
+        transition: 'opacity 0.5s ease-out',
+      }}
+    >
+      {/* Blurred background layer */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundImage: 'url(/fallout-vault-hallway-v0-pt5hy06w1owc1.webp)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          filter: 'blur(10px)',
+          zIndex: 1,
+        }}
+      />
+
+      {/* Dark overlay */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          zIndex: 2,
+        }}
+      />
+
+      {/* Logo container */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 3,
+        }}
+      >
+        <div
+          style={{
+            position: 'relative',
+            width: '300px',
+            height: '300px',
+          }}
+        >
+        {/* SVG with separate layers */}
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 178.06 178.03"
+          style={{
+            width: '100%',
+            height: '100%',
+          }}
+        >
+          <defs>
+            <style>{`.cls-1{fill:#14fe17;}`}</style>
+          </defs>
+          <g id="Layer_2" data-name="Layer 2">
+            <g id="Layer_1-2" data-name="Layer 1">
+              {/* Outer gear and circles - always visible */}
+              <path
+                className="cls-1"
+                d="M174.09,73c-.11,0-.23,0-.34,0-3.38-.48-6.79-.61-10.18-1a3.13,3.13,0,0,1-2.74-2,46.31,46.31,0,0,1-1.7-4.93,83.29,83.29,0,0,0-5.82-13,3.06,3.06,0,0,1,.3-3.69c1.59-2,3.06-4.06,4.75-6a31.06,31.06,0,0,0,3-4,2.93,2.93,0,0,0,0-3.43,14.53,14.53,0,0,0-1.82-2.32c-5-4.87-9.74-10.08-15-14.7-2.63-2.29-3.93-2.31-6.61-.07-2.53,2.11-5,4.29-7.64,6.28a4.32,4.32,0,0,1-5.13.34,83.54,83.54,0,0,0-16.4-6.62A3.52,3.52,0,0,1,106,14.47c-.53-3.78-.85-7.58-1.4-11.36C104.24.72,103.47,0,101.06,0H84.9c-2.67,0-5.33,0-8,0-2,0-2.54.51-3.08,2.37a13.25,13.25,0,0,0-.33,2.05C73,8,72.77,11.57,72.21,15.12A2.82,2.82,0,0,1,70,17.67a82.47,82.47,0,0,0-17.38,7.4,3.37,3.37,0,0,1-4.13-.31c-3-2.25-5.85-4.55-8.83-6.75-2.48-1.84-3.76-1.77-5.9.36C28.54,23.55,23.35,28.77,18.15,34c-2.25,2.25-2.25,3.65-.31,6.17,2.12,2.75,4.24,5.5,6.44,8.18a3.87,3.87,0,0,1,.47,4.86,81.52,81.52,0,0,0-6.51,15.69c-1,3.34-1.61,3.93-5.09,4-3,.11-5.88.51-8.81.82C1,74.08,0,75.09.05,78c0,3.66,0,7.33,0,11C0,93,0,97,.19,101c.16,3.3,1.09,4.31,4.41,4.43s6.44.69,9.68.82c2.18.08,3,.92,3.71,3s1.27,4,2,5.92a88.57,88.57,0,0,0,4.72,10.06,4.69,4.69,0,0,1-.55,5.85c-2.11,2.52-4.18,5.1-6.17,7.73-1.86,2.44-1.9,3.8.18,5.95q7.89,8.19,16.08,16.08c1.77,1.7,3.44,1.64,5.48.23,3.05-2.11,5.72-4.7,8.67-6.94a3.71,3.71,0,0,1,4.48-.45A98.37,98.37,0,0,0,70,160.81a3.32,3.32,0,0,1,2.58,3.08c.38,3.67.89,7.34,1.18,11A3,3,0,0,0,76.35,178h1.74a9.56,9.56,0,0,1,2.77-.17h21c2.24-.21,2.36-.33,2.89-2.48.11-.45.14-.91.22-1.36.63-3.53.81-7.12,1.3-10.66a3.21,3.21,0,0,1,2.55-2.89,77.15,77.15,0,0,0,9.93-3.63c2.57-1.19,5.07-2.52,7.64-3.73a3.46,3.46,0,0,1,4,.58c2.87,2.24,5.68,4.56,8.54,6.81,2.24,1.75,3.55,1.72,5.6-.28,1.5-1.45,3-2.92,4.42-4.42,4-4.12,8.31-7.9,12-12.3,1.63-1.95,1.63-2.78.12-4.9-2.32-3.25-5-6.17-7.43-9.37a2.74,2.74,0,0,1-.23-3.34c1.11-2,2.11-4.12,3.08-6.22a104.24,104.24,0,0,0,4.18-11.22,3.57,3.57,0,0,1,3.32-2.75q4.81-.58,9.61-1.27c4.31-.62,4.52-.77,4.52-5.22V77.13C178,73.88,177.31,73.2,174.09,73ZM89,145.71A56.69,56.69,0,1,1,145.72,89,56.69,56.69,0,0,1,89,145.71Z"
+              />
+              <path
+                className="cls-1"
+                d="M89,142.29A53.27,53.27,0,1,1,142.3,89,53.33,53.33,0,0,1,89,142.29Zm0-98.54A45.27,45.27,0,1,0,134.3,89,45.32,45.32,0,0,0,89,43.75Z"
+              />
+
+              {/* Number 4 - fades in then flickers */}
+              <path
+                className="cls-1"
+                d="M72.57,69.41V90.76h3.88v5.17H72.57v9.71H65.45V95.93h-11V90.76l6.47-21.35ZM60.92,90.76h4.53V76.52Z"
+                style={{
+                  opacity: show4 ? (flicker4 ? 1 : 0.2) : 0,
+                  transition: show4 ? 'opacity 0.05s ease' : 'opacity 0.6s ease',
+                }}
+              />
+
+              {/* Number 0 - fades in then flickers */}
+              <path
+                className="cls-1"
+                d="M83.08,105.87q-4.06-1-4.14-4.76L79,73.94q0-5.18,7.71-5.18h3.18a17.16,17.16,0,0,1,2.93.23L80.33,88.82H88.1Zm.88.49-2.59,4.71,1.45-4.94A7.93,7.93,0,0,0,84,106.36ZM94,69.23q3.82,1.11,3.83,4.71v27.17q0,5.17-7.74,5.18H86.83a17.22,17.22,0,0,1-2.62-.19L95.86,84.94H88.1Zm-.85-.49,3-4.77-1.89,5C93.88,68.88,93.51,68.8,93.12,68.74Z"
+                style={{
+                  opacity: show0 ? (flicker0 ? 1 : 0.2) : 0,
+                  transition: show0 ? 'opacity 0.05s ease' : 'opacity 0.6s ease',
+                }}
+              />
+
+              {/* Number 2 - fades in then flickers */}
+              <path
+                className="cls-1"
+                d="M107.51,94l0,6.47h11.65v5.18H100.42l0-14.88q0-5.17,7.53-5.18h2.17c1.3,0,2-1.08,2-3.23l0-5.83q0-2.58-2.1-2.58h-.65c-1.19,0-1.78.86-1.78,2.58v2.59h-7.12V73.94q0-5.18,7.76-5.18h3.24q7.76,0,7.81,5.18l0,11.64q-.11,5.17-7.84,5.18h-1.79C108.18,90.76,107.51,91.84,107.51,94Z"
+                style={{
+                  opacity: show2 ? (flicker2 ? 1 : 0.2) : 0,
+                  transition: show2 ? 'opacity 0.05s ease' : 'opacity 0.6s ease',
+                }}
+              />
+            </g>
+          </g>
+        </svg>
+        </div>
+      </div>
+    </div>
+  );
+}

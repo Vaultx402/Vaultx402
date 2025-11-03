@@ -4,11 +4,19 @@ import { useRef, useEffect, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import LoadingScreen from './LoadingScreen';
 
 // Static vault door for entry screen (no animation)
-function StaticVaultDoor() {
+function StaticVaultDoor({ onLoad }: { onLoad: () => void }) {
   const groupRef = useRef<THREE.Group>(null);
   const { scene } = useGLTF('/402door.glb');
+
+  // Notify parent when model is loaded
+  useEffect(() => {
+    if (scene) {
+      onLoad();
+    }
+  }, [scene, onLoad]);
 
   return (
     <group ref={groupRef}>
@@ -35,10 +43,10 @@ function VaultDoorModel({ onAnimationComplete }: VaultDoorModelProps) {
 
     if (phase === 'zoom') {
       // Zoom in phase: 0 to 2 seconds (faster)
-      // Camera moves from far away (z=50) to medium distance (z=10)
+      // Camera moves from closer position (z=30) to medium distance (z=10)
       const progress = Math.min(elapsed / 2, 1);
       const easeProgress = 1 - Math.pow(1 - progress, 3); // ease out cubic
-      state.camera.position.z = 50 - (40 * easeProgress); // stops at z=10
+      state.camera.position.z = 30 - (20 * easeProgress); // stops at z=10
 
       if (progress >= 1) {
         setPhase('pause1');
@@ -113,16 +121,51 @@ interface VaultDoorIntroProps {
 export default function VaultDoorIntro({ onComplete }: VaultDoorIntroProps) {
   const [hasStarted, setHasStarted] = useState(false);
   const [finalFade, setFinalFade] = useState(false);
+  const [modelLoaded, setModelLoaded] = useState(false);
+  const [animationComplete, setAnimationComplete] = useState(false);
+  const [canShowContent, setCanShowContent] = useState(false);
+  const [fadeOutLoading, setFadeOutLoading] = useState(false);
+  const [fadeOutButton, setFadeOutButton] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const handleEnterVault = () => {
-    setHasStarted(true);
+  const handleModelLoaded = () => {
+    setModelLoaded(true);
+  };
 
-    // Play vault sound when animation starts
-    audioRef.current = new Audio('/vault.mp3');
-    audioRef.current.play().catch(err => {
-      console.log('Audio playback failed:', err);
-    });
+  // Mark animation as complete after initial sequence (2s)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAnimationComplete(true);
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Trigger fade-out when both model is loaded AND animation is complete
+  useEffect(() => {
+    if (modelLoaded && animationComplete) {
+      setFadeOutLoading(true);
+      // Wait for fade-out to complete before removing loading screen
+      setTimeout(() => {
+        setCanShowContent(true);
+      }, 500);
+    }
+  }, [modelLoaded, animationComplete]);
+
+  const handleEnterVault = () => {
+    // Trigger button fade-out
+    setFadeOutButton(true);
+
+    // Start animation after button fades
+    setTimeout(() => {
+      setHasStarted(true);
+
+      // Play vault sound when animation starts
+      audioRef.current = new Audio('/vault.mp3');
+      audioRef.current.play().catch(err => {
+        console.log('Audio playback failed:', err);
+      });
+    }, 300);
   };
 
   const handleAnimationComplete = () => {
@@ -180,6 +223,9 @@ export default function VaultDoorIntro({ onComplete }: VaultDoorIntroProps) {
         zIndex: 2,
       }} />
 
+      {/* Loading screen - shows until model is loaded AND animation completes */}
+      {!canShowContent && <LoadingScreen fadeOut={fadeOutLoading} />}
+
       {/* 3D Vault Door Model layer - always present */}
       <div style={{
         position: 'absolute',
@@ -190,7 +236,7 @@ export default function VaultDoorIntro({ onComplete }: VaultDoorIntroProps) {
         zIndex: 3,
       }}>
         <Canvas
-          camera={{ position: [0, 0, 50], fov: 45 }}
+          camera={{ position: [0, 0, 30], fov: 45 }}
           style={{ width: '100%', height: '100%' }}
         >
           <ambientLight intensity={0.8} />
@@ -201,7 +247,7 @@ export default function VaultDoorIntro({ onComplete }: VaultDoorIntroProps) {
           {hasStarted ? (
             <VaultDoorModel onAnimationComplete={handleAnimationComplete} />
           ) : (
-            <StaticVaultDoor />
+            <StaticVaultDoor onLoad={handleModelLoaded} />
           )}
         </Canvas>
       </div>
@@ -215,18 +261,21 @@ export default function VaultDoorIntro({ onComplete }: VaultDoorIntroProps) {
           width: '100%',
           height: '100%',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-end',
           justifyContent: 'center',
+          paddingBottom: '15vh',
           zIndex: 4,
+          opacity: fadeOutButton ? 0 : 1,
+          transition: 'opacity 0.3s ease',
         }}>
           <button
             onClick={handleEnterVault}
             style={{
-              fontSize: '2.5rem',
-              padding: '1.5rem 3rem',
+              fontSize: '1.5rem',
+              padding: '1rem 2rem',
               backgroundColor: 'rgba(20, 254, 23, 0.2)',
               color: '#14fe17',
-              border: '3px solid #14fe17',
+              border: '2px solid #14fe17',
               borderRadius: '8px',
               cursor: 'pointer',
               fontFamily: 'PipBoy, sans-serif',
